@@ -5,7 +5,10 @@
 #include <mutex>
 #include <string>
 
+#include <list>
+
 #include <afina/Storage.h>
+//#include "Storage.h"
 
 namespace Afina {
 namespace Backend {
@@ -18,6 +21,7 @@ namespace Backend {
 class MapBasedGlobalLockImpl : public Afina::Storage {
 public:
     MapBasedGlobalLockImpl(size_t max_size = 1024) : _max_size(max_size) {}
+
     ~MapBasedGlobalLockImpl() {}
 
     // Implements Afina::Storage interface
@@ -33,11 +37,22 @@ public:
     bool Delete(const std::string &key) override;
 
     // Implements Afina::Storage interface
-    bool Get(const std::string &key, std::string &value) const override;
+    bool Get(const std::string &key, std::string &value) override;
+
+
+    size_t GetSize() const override;
+
+    size_t GetCurrentSize() const override;
+
+    bool SetNewCurrentSize(const size_t newSize) override;
 
 private:
     size_t _max_size;
-    std::map<std::string, std::string> _backend;
+    size_t _current_size;
+    std::map<std::string, std::string> _cacheMap;
+
+    std::mutex _lock;
+    std::list<std::string> _lru;
 };
 
 } // namespace Backend
