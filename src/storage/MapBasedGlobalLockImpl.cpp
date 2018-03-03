@@ -6,19 +6,39 @@
 namespace Afina {
 namespace Backend {
 
-// See MapBasedGlobalLockImpl.h
+// // See MapBasedGlobalLockImpl.h
     bool MapBasedGlobalLockImpl::Put(const std::string &key, const std::string &value)
     {
         std::unique_lock<std::mutex> guard(_lock);
-        if( _cacheMap.find(key) == _cacheMap.end() )
+
+        auto p = _cacheMap.find(key);               //map iterator
+        auto new_size = key.size() + value.size();
+
+        if (p == _cacheMap.end())
         {
-            if( _lru.size() + 1 > _max_size ) {
-                _cacheMap.erase(_lru.back()); // delete from cache
-                _lru.pop_back();  // erase lru element from the tail
+            while (_current_size + new_size > _max_size) {
+                auto last = _lru.back();
+
+                _current_size -= (int) (last.first.size() + last.second.size());
+
+                _cacheMap.erase(last.first);
+                _lru.pop_back();
             }
-            _lru.push_front(key); //put new element at head
+
+            _lru.push_front(std::make_pair(key, value));        //put new element at head
+            _cacheMap.emplace(_lru.front().first, _lru.begin());
+            _current_size += new_size;
+
+        } else {
+            _current_size -= p->second->second.size();
+
+            _lru.splice(_lru.begin(), _lru, p->second);
+            _lru.front().second = value;
+
+            _current_size += new_size;
+
         }
-        _cacheMap[key] = value;
+
         return true;
     }
 
@@ -26,27 +46,50 @@ namespace Backend {
     bool MapBasedGlobalLockImpl::PutIfAbsent(const std::string &key, const std::string &value)
     {
         std::unique_lock<std::mutex> guard(_lock);
-        if( _cacheMap.find(key) == _cacheMap.end() )
+
+        auto p = _cacheMap.find(key);               //map iterator
+        auto new_size = key.size() + value.size();
+
+        if (p == _cacheMap.end())
         {
-            if( _lru.size() + 1 > _max_size ) {
-                _cacheMap.erase(_lru.back());
+            while (_current_size + new_size > _max_size) {
+                auto last = _lru.back();
+
+                _current_size -= (int) (last.first.size() + last.second.size());
+
+                _cacheMap.erase(last.first);
                 _lru.pop_back();
             }
-            _lru.push_front(key);
-            _cacheMap[key] = value;
-            return true;
+
+            _lru.push_front(std::make_pair(key, value));        //put new element at head
+            _cacheMap.emplace(_lru.front().first, _lru.begin());
+            _current_size += new_size;
+
+        } else {
+            return false;
         }
-        return false;
+
+        return true;
     }
 
 // See MapBasedGlobalLockImpl.h
     bool MapBasedGlobalLockImpl::Set(const std::string &key, const std::string &value)
     {
         std::unique_lock<std::mutex> guard(_lock);
-        if( _cacheMap.find(key) != _cacheMap.end() )
+
+        auto p = _cacheMap.find(key); //map iterator
+        auto new_size = key.size() + value.size();
+
+        if(p != _cacheMap.end())
         {
-            _cacheMap[key] = value;
+            _current_size -= p->second->second.size();
+
+            _lru.splice(_lru.begin(), _lru, p->second);
+            _lru.front().second = value;
+
+            _current_size += new_size;
             return true;
+
         }
         return false;
     }
@@ -55,10 +98,14 @@ namespace Backend {
     bool MapBasedGlobalLockImpl::Delete(const std::string &key)
     {
         std::unique_lock<std::mutex> guard(_lock);
-        if( _cacheMap.find(key) != _cacheMap.end() )
+
+        auto p = _cacheMap.find(key); //map iterator
+
+        if(p != _cacheMap.end())
         {
+            auto item = _cacheMap.find(key);
+            _lru.erase(item->second);
             _cacheMap.erase(key);
-            _lru.remove(key);
             return true;
         }
         return false;
@@ -69,29 +116,31 @@ namespace Backend {
     {
         std::unique_lock<std::mutex> guard(_lock);
 
-        //std::unique_lock<std::mutex> guard(*const_cast<std::mutex *>(&_lock));
-        if( _cacheMap.find(key) != _cacheMap.end() )
-        {
-            value = _cacheMap.at(key);
+        auto p = _cacheMap.find(key); //map iterator
+
+        if (p != _cacheMap.end()){
+            _lru.splice(_lru.begin(), _lru, p->second);
+            value = _lru.front().second;
             return true;
         }
         return false;
     }
 
 // See MapBasedGlobalLockImpl.h
-    size_t MapBasedGlobalLockImpl::GetSize() const {
+    int MapBasedGlobalLockImpl::GetSize() const {
         return _max_size;
     }
 
 
-    size_t MapBasedGlobalLockImpl::GetCurrentSize() const {
+    int MapBasedGlobalLockImpl::GetCurrentSize() const {
         return _current_size;
     }
 
-    bool MapBasedGlobalLockImpl::SetNewCurrentSize(const size_t newSize) {
+    bool MapBasedGlobalLockImpl::SetNewCurrentSize(const int newSize) {
         _current_size = newSize;
         return true;
     }
+
 
 
 

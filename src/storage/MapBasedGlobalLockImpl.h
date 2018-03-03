@@ -4,7 +4,7 @@
 #include <map>
 #include <mutex>
 #include <string>
-
+#include <functional>
 #include <list>
 
 #include <afina/Storage.h>
@@ -20,7 +20,7 @@ namespace Backend {
  */
 class MapBasedGlobalLockImpl : public Afina::Storage {
 public:
-    MapBasedGlobalLockImpl(size_t max_size = 1024) : _max_size(max_size) {}
+    MapBasedGlobalLockImpl(int max_size = 1024) : _max_size(max_size), _current_size(0) {}
 
     ~MapBasedGlobalLockImpl() {}
 
@@ -40,19 +40,26 @@ public:
     bool Get(const std::string &key, std::string &value) override;
 
 
-    size_t GetSize() const override;
-
-    size_t GetCurrentSize() const override;
-
-    bool SetNewCurrentSize(const size_t newSize) override;
+    int GetSize() const override;
+    int GetCurrentSize() const override;
+    bool SetNewCurrentSize(int newSize) override;
 
 private:
-    size_t _max_size;
-    size_t _current_size;
-    std::map<std::string, std::string> _cacheMap;
+
+
+
+    int _max_size;
+    int _current_size;
 
     std::mutex _lock;
-    std::list<std::string> _lru;
+
+    //ключ, значение
+    mutable std::list<std::pair<std::string, std::string> > _lru;
+
+    // ссылка на ключ, итератор на соответствующий элемент в списке
+    std::map<std::reference_wrapper<const std::string>,
+            std::list<std::pair<std::string, std::string> >::iterator,
+            std::less<const std::string> > _cacheMap;
 };
 
 } // namespace Backend
