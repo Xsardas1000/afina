@@ -10,73 +10,80 @@
 #include <afina/network/Server.h>
 
 namespace Afina {
-namespace Network {
-namespace Blocking {
+    namespace Network {
+        namespace Blocking {
 
 /**
  * # Network resource manager implementation
  * Server that is spawning a separate thread for each connection
  */
-class ServerImpl : public Server {
-public:
-    ServerImpl(std::shared_ptr<Afina::Storage> ps);
-    ~ServerImpl();
+            class ServerImpl : public Server {
+            public:
+                ServerImpl(std::shared_ptr<Afina::Storage> ps);
+                ~ServerImpl();
 
-    // See Server.h
-    void Start(uint32_t port, uint16_t workers) override;
+                // See Server.h
+                void Start(uint32_t port, uint16_t workers) override;
 
-    // See Server.h
-    void Stop() override;
+                // See Server.h
+                void Stop() override;
 
-    // See Server.h
-    void Join() override;
+                // See Server.h
+                void Join() override;
 
-protected:
-    /**
-     * Method is running in the connection acceptor thread
-     */
-    void RunAcceptor();
+            protected:
+                /**
+                 * Method is running in the connection acceptor thread
+                 */
+                void RunAcceptor();
 
-    /**
-     * Methos is running for each connection
-     */
-    void RunConnection();
+                /**
+                 * Methos is running for each connection
+                 */
+                void RunConnection(int client_socket);
 
-private:
-    static void *RunAcceptorProxy(void *p);
+            private:
+                static void *RunAcceptorProxy(void *p);
+                static void *RunConnectionProxy(void *p);
 
-    // Atomic flag to notify threads when it is time to stop. Note that
-    // flag must be atomic in order to safely publisj changes cross thread
-    // bounds
-    std::atomic<bool> running;
+                struct workerArgs {
+                    void * this_ptr;
+                    int client_socket;
+                };
 
-    // Thread that is accepting new connections
-    pthread_t accept_thread;
+                // Atomic flag to notify threads when it is time to stop. Note that
+                // flag must be atomic in order to safely publisj changes cross thread
+                // bounds
+                std::atomic<bool> running;
 
-    // Maximum number of client allowed to exists concurrently
-    // on server, permits access only from inside of accept_thread.
-    // Read-only
-    uint16_t max_workers;
+                // Thread that is accepting new connections
+                pthread_t accept_thread;
+                int server_socket;
 
-    // Port to listen for new connections, permits access only from
-    // inside of accept_thread
-    // Read-only
-    uint32_t listen_port;
+                // Maximum number of client allowed to exists concurrently
+                // on server, permits access only from inside of accept_thread.
+                // Read-only
+                uint16_t max_workers;
 
-    // Mutex used to access connections list
-    std::mutex connections_mutex;
+                // Port to listen for new connections, permits access only from
+                // inside of accept_thread
+                // Read-only
+                uint32_t listen_port;
 
-    // Conditional variable used to notify waiters about empty
-    // connections list
-    std::condition_variable connections_cv;
+                // Mutex used to access connections list
+                std::mutex connections_mutex;
 
-    // Threads that are processing connection data, permits
-    // access only from inside of accept_thread
-    std::unordered_set<pthread_t> connections;
-};
+                // Conditional variable used to notify waiters about empty
+                // connections list
+                std::condition_variable connections_cv;
 
-} // namespace Blocking
-} // namespace Network
+                // Threads that are processing connection data, permits
+                // access only from inside of accept_thread
+                std::unordered_set<pthread_t> connections;
+            };
+
+        } // namespace Blocking
+    } // namespace Network
 } // namespace Afina
 
 #endif // AFINA_NETWORK_BLOCKING_SERVER_H

@@ -18,19 +18,35 @@
 #include <unistd.h>
 
 #include <afina/Storage.h>
+#include <afina/execute/Command.h>
+#include <../src/protocol/Parser.h>
+
+#include <algorithm>
 
 namespace Afina {
 namespace Network {
 namespace Blocking {
 
 void *ServerImpl::RunAcceptorProxy(void *p) {
-    ServerImpl *srv = reinterpret_cast<ServerImpl *>(p);
+    auto *srv = reinterpret_cast<ServerImpl *>(p);
     try {
         srv->RunAcceptor();
     } catch (std::runtime_error &ex) {
         std::cerr << "Server fails: " << ex.what() << std::endl;
     }
-    return 0;
+    return nullptr;
+}
+
+
+void* ServerImpl::RunConnectionProxy(void *p) {
+    auto *wa = (workerArgs*)p;
+    auto *srv = reinterpret_cast<ServerImpl *>(wa->this_ptr);
+    try {
+        srv->RunConnection(wa->client_socket);
+    } catch (std::runtime_error &ex) {
+        std::cerr << "Server fails: " << ex.what() << std::endl;
+    }
+    return nullptr;
 }
 
 // See Server.h
@@ -91,6 +107,7 @@ void ServerImpl::Start(uint32_t port, uint16_t n_workers) {
 void ServerImpl::Stop() {
     std::cout << "network debug: " << __PRETTY_FUNCTION__ << std::endl;
     running.store(false);
+    shutdown(server_socket, SHUT_RDWR);
 }
 
 // See Server.h
@@ -123,7 +140,8 @@ void ServerImpl::RunAcceptor() {
     // - Family: IPv4
     // - Type: Full-duplex stream (reliable)
     // - Protocol: TCP
-    int server_socket = socket(PF_INET, SOCK_STREAM, IPPROTO_TCP);
+    //int
+    server_socket = socket(PF_INET, SOCK_STREAM, IPPROTO_TCP);
     if (server_socket == -1) {
         throw std::runtime_error("Failed to open socket");
     }
@@ -172,26 +190,33 @@ void ServerImpl::RunAcceptor() {
 
         // TODO: Start new thread and process data from/to connection
         {
-            std::string msg = "TODO: start new thread and process memcached protocol instead";
-            if (send(client_socket, msg.data(), msg.size(), 0) <= 0) {
+            if( connections.size() < max_workers ) {
+                pthread_t thread_id;
+                struct workerArgs wa;
+                wa.client_socket = client_socket;
+                wa.this_ptr = this;
+                pthread_create(&thread_id, NULL, RunConnectionProxy, (void*)&wa);
+            } else {
                 close(client_socket);
-                close(server_socket);
-                throw std::runtime_error("Socket send() failed");
             }
-            close(client_socket);
-        }
+        } // TODO
     }
 
     // Cleanup on exit...
     close(server_socket);
+
+
 }
 
+
+
 // See Server.h
-void ServerImpl::RunConnection() {
+void ServerImpl::RunConnection(int client_socket) {
     std::cout << "network debug: " << __PRETTY_FUNCTION__ << std::endl;
-    // TODO: All connection work is here
+    
+    }
 }
 
 } // namespace Blocking
-} // namespace Network
+// } // namespace Network
 } // namespace Afina
