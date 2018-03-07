@@ -46,7 +46,7 @@ namespace Afina {
                 static void *RunAcceptorProxy(void *p);
                 static void *RunConnectionProxy(void *p);
 
-                struct workerArgs {
+                struct Args {
                     void * this_ptr;
                     int client_socket;
                 };

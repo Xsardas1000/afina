@@ -38,13 +38,14 @@ bool MapBasedGlobalLockImpl::Put(const std::string &key, const std::string &valu
         _current_size += new_size;
 
     } else {
-        _current_size -= p->second->second.size();
 
+        auto old_size = p->second->first.size() + p->second->second.size();
         _lru.splice(_lru.begin(), _lru, p->second);
+
+        if (!FreeSpace((int)(new_size - old_size))) {
+            return false;
+        }
         _lru.front().second = value;
-
-        _current_size += new_size;
-
     }
     return true;
 }
@@ -72,7 +73,6 @@ bool MapBasedGlobalLockImpl::PutIfAbsent(const std::string &key, const std::stri
     } else {
         return false;
     }
-
     return true;
 }
 
@@ -91,9 +91,7 @@ bool MapBasedGlobalLockImpl::Set(const std::string &key, const std::string &valu
         auto old_size = p->second->first.size() + p->second->second.size();
         _lru.splice(_lru.begin(), _lru, p->second);
 
-        if (!FreeSpace((int)new_size)) {
-            return false;
-        }
+        FreeSpace((int)(new_size - old_size));
 
         _current_size -= p->second->second.size();
         _lru.front().second = value;
