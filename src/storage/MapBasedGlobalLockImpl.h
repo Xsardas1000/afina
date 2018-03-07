@@ -43,10 +43,9 @@ public:
     int GetSize() const override;
     int GetCurrentSize() const override;
     bool SetNewCurrentSize(int newSize) override;
+    bool FreeSpace(int new_size);
 
 private:
-
-
 
     int _max_size;
     int _current_size;

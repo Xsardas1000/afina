@@ -190,12 +190,18 @@ void ServerImpl::RunAcceptor() {
 
         // TODO: Start new thread and process data from/to connection
         {
-            if( connections.size() < max_workers ) {
+            std::lock_guard<std::mutex> lock(connections_mutex);
+            if(connections.size() < max_workers) {
                 pthread_t thread_id;
                 struct workerArgs wa;
                 wa.client_socket = client_socket;
                 wa.this_ptr = this;
-                pthread_create(&thread_id, NULL, RunConnectionProxy, (void*)&wa);
+
+                if (pthread_create(&thread_id, nullptr, ServerImpl::RunConnectionProxy, (void*)&wa) < 0) {
+                    throw std::runtime_error("Could not create server thread");
+                }
+                connections.insert(thread_id);
+
             } else {
                 close(client_socket);
             }
@@ -205,7 +211,11 @@ void ServerImpl::RunAcceptor() {
     // Cleanup on exit...
     close(server_socket);
 
-
+    // Wait until for all connections to be complete
+    std::unique_lock<std::mutex> __lock(connections_mutex);
+    while (!connections.empty()) {
+        connections_cv.wait(__lock);
+    }
 }
 
 
@@ -213,10 +223,88 @@ void ServerImpl::RunAcceptor() {
 // See Server.h
 void ServerImpl::RunConnection(int client_socket) {
     std::cout << "network debug: " << __PRETTY_FUNCTION__ << std::endl;
-    
+
+    // TODO: All connection work is here
+    size_t buf_size = 2;
+    char msg_buf[buf_size];
+    memset(msg_buf, 0, buf_size);
+    int rval;
+    size_t parsed = 0;
+    Afina::Protocol::Parser parser;
+    std::string command = "";
+    while(running.load() && ((rval = read(client_socket, msg_buf, buf_size)) != 0 || command.size() > 0) )
+    {
+        if( rval < 0 ) {
+            std::cout << "Reading stream error" << std::endl;
+            break;
+        }
+        command += msg_buf;
+        bool parse_finished = false;
+        try {
+            parse_finished = parser.Parse(command, parsed);
+        } catch(...) {
+            std::string result = "ERROR\r\n";
+            if( send(client_socket, result.data(), result.size(), 0) <= 0 ) {
+                close(client_socket);
+                throw std::runtime_error("Socket send() failed");
+            }
+            break;
+        }
+        command.erase(0, parsed);
+        parsed = 0;
+        if( parse_finished ) {
+            uint32_t body_size;
+            std::unique_ptr<Afina::Execute::Command> com_ptr = parser.Build(body_size);
+            std::string args;
+            if( body_size > 0 ) {
+                while( body_size + 2 > command.size() ) {
+                    rval = read(client_socket, msg_buf, buf_size);
+                    command += msg_buf;
+                    memset(msg_buf, 0, buf_size);
+                }
+                // get command argument
+                args = command.substr(0, body_size);
+                command.erase(0, body_size + 2); // including /r/n
+            }
+            std::string result;
+            try {
+                com_ptr->Execute(*pStorage, args, result);
+            } catch(...) {
+                result = "SERVER_ERROR";
+            }
+            result += "\r\n";
+            if (result.size() && send(client_socket, result.data(), result.size(), 0) <= 0 ) {
+                close(client_socket);
+                throw std::runtime_error("Socket send() failed");
+            }
+            parser.Reset();
+            parsed = 0;
+        }
+        memset(msg_buf, 0, buf_size);
+    }
+    close(client_socket);
+
+    // Thread is about to stop, remove self from list of connections
+    // and it was the very last one, notify main thread
+    {
+        std::unique_lock<std::mutex> __lock(connections_mutex);
+        auto pos = connections.find(pthread_self());
+
+       // assert(pos != connections.end());
+        connections.erase(pos);
+
+        if (connections.empty()) {
+            // Better to unlock before notify in order to let notified thread
+            // hold the mutex. Otherwise notification might be skipped
+            __lock.unlock();
+
+            // We are pretty sure that only ONE thread is waiting for connections
+            // queue to be empty - main thread
+            connections_cv.notify_one();
+        }
     }
 }
 
 } // namespace Blocking
-// } // namespace Network
+ } // namespace Network
 } // namespace Afina
