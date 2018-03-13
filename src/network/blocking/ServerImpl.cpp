@@ -178,7 +178,8 @@ void ServerImpl::RunAcceptor() {
     int client_socket;
     struct sockaddr_in client_addr;
     socklen_t sinSize = sizeof(struct sockaddr_in);
-    while (running.load()) {
+    while (running.load())
+    {
         std::cout << "network debug: waiting for connection..." << std::endl;
 
         // When an incoming connection arrives, accept it. The call to accept() blocks until
@@ -193,14 +194,13 @@ void ServerImpl::RunAcceptor() {
             std::lock_guard<std::mutex> lock(connections_mutex);
             if(connections.size() < max_workers) {
                 pthread_t thread_id;
-                struct Args args;
-                args.client_socket = client_socket;
-                args.this_ptr = this;
+                auto args = new Args(this, client_socket);
 
-                if (pthread_create(&thread_id, nullptr, ServerImpl::RunConnectionProxy, (void*)&args) < 0) {
+                if (pthread_create(&thread_id, nullptr, ServerImpl::RunConnectionProxy, args) < 0) {
                     throw std::runtime_error("Could not create server thread");
                 }
                 connections.insert(thread_id);
+                std::cout << "Current number of connections:" << connections.size() << std::endl;
 
             } else {
                 close(client_socket);
@@ -210,6 +210,7 @@ void ServerImpl::RunAcceptor() {
 
     // Cleanup on exit...
     close(server_socket);
+    std::cout << "close server socket" << std::endl;
 
     // Wait until for all connections to be complete
     std::unique_lock<std::mutex> __lock(connections_mutex);
@@ -218,12 +219,14 @@ void ServerImpl::RunAcceptor() {
     }
 }
 
+
+
 // See Server.h
 void ServerImpl::RunConnection(int client_socket) {
     std::cout << "network debug: " << __PRETTY_FUNCTION__ << std::endl;
 
     // TODO: All connection work is here
-    size_t buf_size = 2;
+    size_t buf_size = 100;
     char msg_buf[buf_size];
     memset(msg_buf, 0, buf_size);
     int rval;
@@ -232,34 +235,43 @@ void ServerImpl::RunConnection(int client_socket) {
     std::string command = "";
     while(running.load() && ((rval = (int)read(client_socket, msg_buf, buf_size)) != 0 || command.size() > 0) )
     {
-        if(rval < 0) {
+        if(rval < 0)
+        {
             std::cout << "Reading stream error" << std::endl;
             break;
         }
         command += msg_buf;
         bool parse_finished = false;
-        try {
+        try
+        {
             parse_finished = parser.Parse(command, parsed); //
         } catch(...) {
             std::string result = "ERROR\r\n";
-            if( send(client_socket, result.data(), result.size(), 0) <= 0 ) {
+            if (send(client_socket, result.data(), result.size(), 0) <= 0)
+            {
                 close(client_socket);
                 throw std::runtime_error("Socket send() failed");
             }
             break;
         }
-        command.erase(0, parsed); //remove parsed characters
+        command.erase(0, parsed); //remove parsed characters from the beginning
         parsed = 0;
+
+        // if parser returns true, it means that it has parsed the hole command
         if(parse_finished) {
             uint32_t body_size;
+
+            //create new command and get number of bytes to read (arguments for the command)
             std::unique_ptr<Afina::Execute::Command> com_ptr = parser.Build(body_size);
 
             parser.Reset();
             parsed = 0;
 
+            std::cout << "Bytes to read" << body_size << std::endl;
             std::string args;
-            if(body_size > 0 ) {
-                while( body_size + 2 > command.size() ) {
+            if(body_size > 0) {
+                while(body_size + 2 > command.size())
+                {
                     rval = (int) read(client_socket, msg_buf, buf_size);
                     command += msg_buf;
                     memset(msg_buf, 0, buf_size);
@@ -274,10 +286,15 @@ void ServerImpl::RunConnection(int client_socket) {
             } catch(...) {
                 result = "SERVER_ERROR";
             }
+            result += "\r\n";
+            if (result.size() && send(client_socket, result.data(), result.size(), 0) <= 0) {
+                close(client_socket);
+                throw std::runtime_error("Socket send() failed");
+            }
+
         }
         memset(msg_buf, 0, buf_size);
     }
-    close(client_socket);
 
     {
         std::unique_lock<std::mutex> __lock(connections_mutex);
@@ -291,5 +308,5 @@ void ServerImpl::RunConnection(int client_socket) {
 }
 
 } // namespace Blocking
- } // namespace Network
+} // namespace Network
 } // namespace Afina
