@@ -114,7 +114,7 @@ void ServerImpl::Stop() {
 // See Server.h
 void ServerImpl::Join() {
     std::cout << "network debug: " << __PRETTY_FUNCTION__ << std::endl;
-    pthread_join(accept_thread, 0); // wait for thread cancellation
+    pthread_join(accept_thread, 0); // wait
 }
 
 // See Server.h
@@ -141,7 +141,6 @@ void ServerImpl::RunAcceptor() {
     // - Family: IPv4
     // - Type: Full-duplex stream (reliable)
     // - Protocol: TCP
-    //int
     server_socket = socket(PF_INET, SOCK_STREAM, IPPROTO_TCP);
     if (server_socket == -1) {
         throw std::runtime_error("Failed to open socket");
@@ -227,7 +226,7 @@ void ServerImpl::RunConnection(int client_socket) {
     std::cout << "network debug: " << __PRETTY_FUNCTION__ << std::endl;
 
     // TODO: All connection work is here
-    size_t buf_size = 100;
+    size_t buf_size = 2;
     char buf[buf_size];
     memset(buf, 0, buf_size);
     ssize_t received;

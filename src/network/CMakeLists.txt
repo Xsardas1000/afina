@@ -8,7 +8,8 @@ set(SOURCE_FILES
     nonblocking/ServerImpl.cpp
     nonblocking/Worker.cpp
     nonblocking/Utils.cpp
-        blocking/test_nonblock.cpp)
+    blocking/test_nonblock.cpp
+    blocking/Executor.cpp)
 
 add_library(Network ${SOURCE_FILES})
 target_link_libraries(Network pthread uv Protocol Execute ${CMAKE_THREAD_LIBS_INIT})
