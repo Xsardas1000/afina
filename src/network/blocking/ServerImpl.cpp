@@ -56,7 +56,7 @@ ServerImpl::ServerImpl(std::shared_ptr<Afina::Storage> ps) : Server(ps) {}
 ServerImpl::~ServerImpl() {}
 
 // See Server.h
-void ServerImpl::Start(uint32_t port, uint16_t n_workers) {
+void ServerImpl::Start(uint32_t port, uint16_t n_workers=4) {
     std::cout << "network debug: " << __PRETTY_FUNCTION__ << std::endl;
 
     // If a client closes a connection, this will generally produce a SIGPIPE
@@ -71,6 +71,7 @@ void ServerImpl::Start(uint32_t port, uint16_t n_workers) {
 
     // Setup server parameters BEFORE thread created, that will guarantee
     // variable value visibility
+    std::cout << n_workers << std::endl;
     max_workers = n_workers;
     listen_port = port;
 
@@ -113,7 +114,7 @@ void ServerImpl::Stop() {
 // See Server.h
 void ServerImpl::Join() {
     std::cout << "network debug: " << __PRETTY_FUNCTION__ << std::endl;
-    pthread_join(accept_thread, 0);
+    pthread_join(accept_thread, 0); // wait for thread cancellation
 }
 
 // See Server.h
@@ -213,9 +214,9 @@ void ServerImpl::RunAcceptor() {
     std::cout << "close server socket" << std::endl;
 
     // Wait until for all connections to be complete
-    std::unique_lock<std::mutex> __lock(connections_mutex);
+    std::unique_lock<std::mutex> _lock(connections_mutex);
     while (!connections.empty()) {
-        connections_cv.wait(__lock);
+        connections_cv.wait(_lock);
     }
 }
 
@@ -227,26 +228,32 @@ void ServerImpl::RunConnection(int client_socket) {
 
     // TODO: All connection work is here
     size_t buf_size = 100;
-    char msg_buf[buf_size];
-    memset(msg_buf, 0, buf_size);
-    int rval;
+    char buf[buf_size];
+    memset(buf, 0, buf_size);
+    ssize_t received;
     size_t parsed = 0;
     Afina::Protocol::Parser parser;
     std::string command = "";
-    while(running.load() && ((rval = (int)read(client_socket, msg_buf, buf_size)) != 0 || command.size() > 0) )
+
+    bool parse_finished;
+
+    while(running.load() && ((received = (int)read(client_socket, buf, buf_size)) != 0 || !command.empty() > 0) )
     {
-        if(rval < 0)
+        if(received < 0)
         {
             std::cout << "Reading stream error" << std::endl;
             break;
         }
-        command += msg_buf;
-        bool parse_finished = false;
+
+        //std::cout << "buf after reading:" << buf << std::endl;
+        command += buf;
         try
         {
-            parse_finished = parser.Parse(command, parsed); //
+            parse_finished = parser.Parse(command.c_str(), received, parsed);
+            //std::cout << "buf after parsing:" << buf << std::endl;
+
         } catch(...) {
-            std::string result = "ERROR\r\n";
+            std::string result = "PARSE ERROR\r\n";
             if (send(client_socket, result.data(), result.size(), 0) <= 0)
             {
                 close(client_socket);
@@ -267,19 +274,18 @@ void ServerImpl::RunConnection(int client_socket) {
             parser.Reset();
             parsed = 0;
 
-            std::cout << "Bytes to read" << body_size << std::endl;
+            std::cout << "Bytes to read:" << body_size << std::endl;
             std::string args;
             if(body_size > 0) {
                 while(body_size + 2 > command.size())
                 {
-                    rval = (int) read(client_socket, msg_buf, buf_size);
-                    command += msg_buf;
-                    memset(msg_buf, 0, buf_size);
+                    received = read(client_socket, buf, buf_size);
+                    command += buf;
                 }
 
                 args = command.substr(0, body_size);
-                command.erase(0, body_size + 2); // including /r/n
             }
+            command.clear();
             std::string result;
             try {
                 com_ptr->Execute(*pStorage, args, result);
@@ -287,26 +293,25 @@ void ServerImpl::RunConnection(int client_socket) {
                 result = "SERVER_ERROR";
             }
             result += "\r\n";
-            if (result.size() && send(client_socket, result.data(), result.size(), 0) <= 0) {
+            if (!result.empty() && send(client_socket, result.data(), result.size(), 0) <= 0) {
                 close(client_socket);
                 throw std::runtime_error("Socket send() failed");
             }
 
         }
-        memset(msg_buf, 0, buf_size);
+        memset(buf, 0, buf_size);
     }
 
+    close(client_socket);
     {
-        std::unique_lock<std::mutex> __lock(connections_mutex);
+        std::unique_lock<std::mutex> _lock(connections_mutex);
         auto index = connections.find(pthread_self());
         connections.erase(index);
-
-        if (connections.empty()) {
-            connections_cv.notify_one();
-        }
+        connections_cv.notify_all();
     }
 }
 
 } // namespace Blocking
 } // namespace Network
 } // namespace Afina
+
