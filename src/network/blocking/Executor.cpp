@@ -1,95 +1,60 @@
-//#include <afina/Executor.h>
-//
-//#include <condition_variable>
-//#include <functional>
-//#include <memory>
-//#include <mutex>
-//#include <queue>
-//#include <string>
-//#include <thread>
-//
-//#include <cstring>
-//#include <iostream>
-//
-//
-//namespace Afina {
-//
-//Executor::Executor(std::string name, size_t _low_watermark, size_t _high_watermark, size_t _max_queue_size, std::chrono::milliseconds _idle_time)
-//        :low_watermark(_low_watermark),  high_watermark(_high_watermark), max_queue_size(_max_queue_size), idle_time(_idle_time), state(State::kRun)
-//{
-//    std::cout << "pool: " << name << " " << __PRETTY_FUNCTION__ << std::endl;
-//    std::lock_guard<std::mutex> lock(mutex);
-//    for (int i = 0; i < low_watermark; i++)
-//    {
-//        threads.emplace_back(perform, this);
-//    }
-//}
-//
-//void Executor::Stop(bool await) {
-//    std::cout << "pool: " << __PRETTY_FUNCTION__ << std::endl;
-//    {
-//        std::lock_guard<std::mutex> lock(mutex);
-//        if (state == State::kRun)
-//        {
-//            state = State::kStopping;
-//        }
-//    }
-//
-//    empty_condition.notify_all();
-//    if (await) {
-//        for (size_t i = 0; i < threads.size(); i++) {
-//            if (threads[i].joinable())
-//            {
-//                threads[i].join();
-//            }
-//        }
-//        state = State::kStopped;
-//    }
-//}
-//
-//Executor::~Executor() {
-//    std::cout << "pool: " << __PRETTY_FUNCTION__ << std::endl;
-//    Stop(true);
-//}
-//
-//void perform(Executor *executor) {
-//    std::cout << "pool: " << __PRETTY_FUNCTION__ << std::endl;
-//    std::function<void()> task;
-//
-//    while (true)
-//    {
-//        {
-//            std::unique_lock<std::mutex> lock(executor->mutex);
-//
-//            while (executor->state == Executor::State::kRun && executor->tasks.empty())
-//            {
-//                executor->empty_condition.wait(lock);
-//            }
-//
-//            if (executor->empty_condition.wait_for(lock, executor->idle_time, [&executor]() {return executor->tasks.empty() || executor->state == Executor::State::kStopping;}))
-//            {
-//                if (executor->threads.size() > executor->low_watermark)
-//                {
-//                    for (size_t i = 0; i < executor->threads.size(); i++)
-//                    {
-//                        if (executor->threads[i].get_id() == std::this_thread::get_id())
-//                        {
-//                            executor->threads.erase(executor->threads.begin() + i);
-//                            break;
-//                        }
-//                    }
-//                }
-//                return;
-//            }
-//
-//            if (executor->state == Executor::State::kStopped || executor->tasks.empty())
-//            {
-//                return;
-//            }
-//
-//            task = executor->tasks.front();
-//            executor->tasks.pop_front();
-//        }
-//        task();
-//    }
-//}
+#include <afina/Executor.h>
+
+#include <condition_variable>
+#include <functional>
+#include <memory>
+#include <mutex>
+#include <queue>
+#include <string>
+#include <thread>
+
+#include <cstring>
+#include <iostream>
+
+
+namespace Afina {
+
+Executor::Executor(std::string _name, size_t _low_watermark, size_t _high_watermark,
+                   size_t _max_queue_size, std::chrono::milliseconds _idle_time)
+{
+
+    name = _name;
+    low_watermark = _low_watermark;
+    hight_watermark = _high_watermark;
+    max_queue_size = _max_queue_size;
+    idle_time = _idle_time;
+    state = State::kRun;
+
+
+    std::cout << "pool: " << name << " " << __PRETTY_FUNCTION__ << std::endl;
+    std::lock_guard<std::mutex> lock(mutex);
+    for (int i = 0; i < low_watermark; i++)
+    {
+        threads.emplace_back(perform, this);
+    }
+}
+
+void Executor::Stop(bool await) {
+    std::cout << "pool: " << __PRETTY_FUNCTION__ << std::endl;
+    {
+        std::lock_guard<std::mutex> lock(mutex);
+        if (state == State::kRun)
+        {
+            state = State::kStopping;
+        }
+    }
+
+}
+
+Executor::~Executor() {
+    std::cout << "pool: " << __PRETTY_FUNCTION__ << std::endl;
+    Stop(true);
+}
+
+void perform(Executor *executor) {
+    std::cout << "pool: " << __PRETTY_FUNCTION__ << std::endl;
+    std::function<void()> task;
+    
+}
+
+

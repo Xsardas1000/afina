@@ -27,7 +27,7 @@ class Executor {
         kStopped
     };
 
-    Executor(std::string name, int size);
+    Executor(std::string name, size_t _low_watermark, size_t _high_watermark, size_t _max_queue_size, std::chrono::milliseconds _idle_time);
     ~Executor();
 
     /**
@@ -66,6 +66,12 @@ private:
     Executor(Executor &&);                 // = delete;
     Executor &operator=(const Executor &); // = delete;
     Executor &operator=(Executor &&);      // = delete;
+
+    std::string name;
+    size_t low_watermark;
+    size_t hight_watermark;
+    size_t max_queue_size;
+    std::chrono::milliseconds idle_time;
 
     /**
      * Main function that all pool threads are running. It polls internal task queue and execute tasks

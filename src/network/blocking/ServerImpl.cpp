@@ -185,8 +185,9 @@ void ServerImpl::RunAcceptor() {
         // When an incoming connection arrives, accept it. The call to accept() blocks until
         // the incoming connection arrives
         if ((client_socket = accept(server_socket, (struct sockaddr *)&client_addr, &sinSize)) == -1) {
-            close(client_socket); //?
-            throw std::runtime_error("Socket accept() failed");
+//            close(client_socket); //?
+//            throw std::runtime_error("Socket accept() failed");
+            break;
         }
 
         // TODO: Start new thread and process data from/to connection
@@ -226,7 +227,7 @@ void ServerImpl::RunConnection(int client_socket) {
     std::cout << "network debug: " << __PRETTY_FUNCTION__ << std::endl;
 
     // TODO: All connection work is here
-    size_t buf_size = 2;
+    size_t buf_size = 3;
     char buf[buf_size];
     memset(buf, 0, buf_size);
     ssize_t received;
@@ -236,7 +237,7 @@ void ServerImpl::RunConnection(int client_socket) {
 
     bool parse_finished;
 
-    while(running.load() && ((received = (int)read(client_socket, buf, buf_size)) != 0 || !command.empty() > 0) )
+    while(running.load() && ((received = (int)recv(client_socket, buf, buf_size, 0)) != 0 || !command.empty() > 0) )
     {
         if(received < 0)
         {
@@ -266,6 +267,7 @@ void ServerImpl::RunConnection(int client_socket) {
         // if parser returns true, it means that it has parsed the hole command
         if(parse_finished) {
             uint32_t body_size;
+            //sleep(5);
 
             //create new command and get number of bytes to read (arguments for the command)
             std::unique_ptr<Afina::Execute::Command> com_ptr = parser.Build(body_size);
