@@ -18,6 +18,7 @@
 #include <unistd.h>
 
 #include <afina/Storage.h>
+#include <afina/Executor.h>
 #include <afina/execute/Command.h>
 #include <../src/protocol/Parser.h>
 
@@ -175,6 +176,10 @@ void ServerImpl::RunAcceptor() {
         throw std::runtime_error("Socket listen() failed");
     }
 
+
+
+    Afina::Executor executor("Executor", 10, 20, 60, std::chrono::milliseconds(1000));
+
     int client_socket;
     struct sockaddr_in client_addr;
     socklen_t sinSize = sizeof(struct sockaddr_in);
@@ -187,7 +192,11 @@ void ServerImpl::RunAcceptor() {
         if ((client_socket = accept(server_socket, (struct sockaddr *)&client_addr, &sinSize)) == -1) {
 //            close(client_socket); //?
 //            throw std::runtime_error("Socket accept() failed");
-            break;
+            if (!running.load()) {
+                std::cout << "stop server\n";
+                break;
+            }
+            throw std::runtime_error("Socket accept() failed");
         }
 
         // TODO: Start new thread and process data from/to connection
@@ -197,9 +206,16 @@ void ServerImpl::RunAcceptor() {
                 pthread_t thread_id;
                 auto args = new Args(this, client_socket);
 
-                if (pthread_create(&thread_id, nullptr, ServerImpl::RunConnectionProxy, args) < 0) {
-                    throw std::runtime_error("Could not create server thread");
+                //new
+                if (!executor.Execute(&Afina::Network::Blocking::ServerImpl::RunConnection, this, client_socket)) {
+                    close(client_socket);
+                    throw std::runtime_error("Could not create thread");
                 }
+
+//                if (pthread_create(&thread_id, nullptr, ServerImpl::RunConnectionProxy, args) < 0) {
+//                    close(client_socket);
+//                    throw std::runtime_error("Could not create thread");
+//                }
                 connections.insert(thread_id);
                 std::cout << "Current number of connections:" << connections.size() << std::endl;
 

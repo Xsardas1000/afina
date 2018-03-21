@@ -8,24 +8,34 @@
 #include <queue>
 #include <string>
 #include <thread>
+#include <pthread.h>
+
 
 namespace Afina {
 
 /**
  * # Thread pool
  */
+
+
+class Executor;
+//static void perform(Executor *executor);
+
 class Executor {
+public:
+
     enum class State {
         // Threadpool is fully operational, tasks could be added and get executed
         kRun,
 
-        // Threadpool is on the way to be shutdown, no ned task could be added, but existing will be
+        // Threadpool is on the way to be shutdown, no new task could be added, but existing will be
         // completed as requested
         kStopping,
 
         // Threadppol is stopped
         kStopped
     };
+
 
     Executor(std::string name, size_t _low_watermark, size_t _high_watermark, size_t _max_queue_size, std::chrono::milliseconds _idle_time);
     ~Executor();
@@ -54,6 +64,26 @@ class Executor {
             return false;
         }
 
+
+        // if the queue is full
+        if (tasks.size() == max_queue_size)
+        {
+            return false;
+        }
+
+        // if all threads are busy but we able to add new one
+        if (num_working == threads.size() && threads.size() < high_watermark)
+        {
+            threads.emplace_back(perform, this);
+//            pthread_t thread_id;
+//            if (pthread_create(&thread_id, nullptr, perform, this) < 0) {
+//                throw std::runtime_error("Could not create thread");
+//            }
+//            threads.emplace_back(thread_id);
+        }
+
+
+
         // Enqueue new task
         tasks.push_back(exec);
         empty_condition.notify_one();
@@ -69,14 +99,16 @@ private:
 
     std::string name;
     size_t low_watermark;
-    size_t hight_watermark;
+    size_t high_watermark;
     size_t max_queue_size;
     std::chrono::milliseconds idle_time;
+
+    size_t num_working = 0;
 
     /**
      * Main function that all pool threads are running. It polls internal task queue and execute tasks
      */
-    friend void perform(Executor *executor);
+    static void perform(Executor *executor);
 
     /**
      * Mutex to protect state below from concurrent modification
@@ -92,6 +124,8 @@ private:
      * Vector of actual threads that perorm execution
      */
     std::vector<std::thread> threads;
+    //std::vector<pthread_t> threads;
+    //std::unordered_set<std::thread::id> threads;
 
     /**
      * Task queue
@@ -102,6 +136,9 @@ private:
      * Flag to stop bg threads
      */
     State state;
+
+
+    std::condition_variable cv_finish;
 };
 
 } // namespace Afina
