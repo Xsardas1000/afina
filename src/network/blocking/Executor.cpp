@@ -8,6 +8,7 @@ namespace Afina {
     Executor::Executor(std::string _name, size_t _low_watermark, size_t _high_watermark,
                        size_t _max_queue_size, std::chrono::milliseconds _idle_time) {
 
+
         name = _name;
         low_watermark = _low_watermark;
         high_watermark = _high_watermark;
@@ -16,7 +17,7 @@ namespace Afina {
 
         state = State::kRun;
 
-
+        std::cout << "creating executor\n";
         std::unique_lock<std::mutex> lock(mutex);
 
         for (int i = 0; i < low_watermark; i++) {
@@ -34,6 +35,8 @@ namespace Afina {
     }
 
     void Executor::Stop(bool await) {
+        std::cout << "network debug: " << __PRETTY_FUNCTION__ << std::endl;
+
         {
             std::unique_lock<std::mutex> lock(mutex);
             if (state == State::kRun) {
@@ -48,12 +51,16 @@ namespace Afina {
             std::unique_lock<std::mutex> lock(mutex);
 
             //wait all threads to finish
-            empty_condition.wait(lock, [this]{return !threads.empty();});
+            std::cout << threads.size() << std::endl;
+            while (!threads.empty()) {
+                empty_condition.wait(lock);
+            }
 
             //all threads completed
-            state = State::kStopped;
         }
-        //state = State::kStopped; //?
+        std::cout << "stop\n";
+
+        state = State::kStopped;
     }
 
     Executor::~Executor() {
@@ -62,6 +69,7 @@ namespace Afina {
 
 
     void Executor::perform(Executor *executor) {
+        std::cout << "network debug: " << __PRETTY_FUNCTION__ << std::endl;
 
 
         std::function<void()> task;
@@ -77,10 +85,11 @@ namespace Afina {
                     executor->empty_condition.wait(lock);
                 }
 
-                auto finish = executor->empty_condition.wait_for(lock,
+                auto res = executor->empty_condition.wait_for(lock,
                                                                 executor->idle_time,
-                                                                [executor]() {return (executor->tasks.empty() || executor->state == Executor::State::kStopping);});
-                if (finish)
+                                                            [&executor]() {return (!executor->tasks.empty() && executor->state != Executor::State::kStopping);});
+                if ((!res && (executor->threads.size() > executor->low_watermark)) ||
+                        (executor->state == Executor::State::kStopped))
                 {
                     if (executor->threads.size() > executor->low_watermark)
                     // kill current thread
@@ -101,18 +110,18 @@ namespace Afina {
                     return;
                 }
 
-                if (executor->state == Executor::State::kStopped)
-                {
-                    return;
-                }
 
                 executor->num_working++;
                 task = executor->tasks.front();
                 executor->tasks.pop_front();
             }
             // out of lock
+            std::cout << "going to start task\n";
+
             task();
+            std::cout << "completed task\n";
         }
+
     }
 
 }
