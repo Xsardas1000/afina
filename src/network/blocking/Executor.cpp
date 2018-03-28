@@ -24,40 +24,33 @@ namespace Afina {
             threads.emplace_back(perform, this);
         }
 
-//        for (int i = 0; i < low_watermark; i++)
-//        {
-//            pthread_t thread_id;
-//            if (pthread_create(&thread_id, nullptr, perform, this) < 0) {
-//                throw std::runtime_error("Could not create thread");
-//            }
-//            threads.emplace_back(thread_id); //push_back doesn't work
-//        }
     }
 
     void Executor::Stop(bool await) {
         std::cout << "network debug: " << __PRETTY_FUNCTION__ << std::endl;
 
         {
-            std::unique_lock<std::mutex> lock(mutex);
-            if (state == State::kRun) {
+            std::lock_guard<std::mutex> lock(mutex);
+            if (state == State::kRun)
+            {
                 state = State::kStopping;
             }
         }
 
-        //send to all threads that we are going to stop
+        std::cout << "stopping\n";
+
         empty_condition.notify_all();
-        if (await)
-        {
-            std::unique_lock<std::mutex> lock(mutex);
-
-            //wait all threads to finish
-            std::cout << threads.size() << std::endl;
-            while (!threads.empty()) {
-                empty_condition.wait(lock);
+        if (await) {
+            for (size_t i = 0; i < threads.size(); i++) {
+                if (threads[i].joinable())
+                {
+                  // The function returns when the thread execution has completed.
+                  //This blocks the execution of the thread that calls this function until the function called on construction returns
+                    threads[i].join();
+                }
             }
-
-            //all threads completed
         }
+
         std::cout << "stop\n";
 
         state = State::kStopped;
@@ -80,46 +73,43 @@ namespace Afina {
                 std::unique_lock<std::mutex> lock(executor->mutex);
                 executor->num_working--;
 
-                while (executor->state == Executor::State::kRun && executor->tasks.empty())
-                {
-                    executor->empty_condition.wait(lock);
+
+                if (executor->empty_condition.wait_for(lock, executor->idle_time, [&executor](void) {
+                        return executor->state == Executor::State::kStopping || executor->tasks.empty();
+                    })) {
+
+                    if ((executor->threads.size() > executor->low_watermark) &&  executor->tasks.empty() ||
+                        executor->state != State::kRun && executor->tasks.empty())
+                    {
+
+                          auto curr_thread_id = std::this_thread::get_id();
+                          for (size_t i = 0; i < executor->threads.size(); i++)
+                          {
+                              if (executor->threads[i].get_id() == curr_thread_id)
+                              {
+                                  executor->threads[i].detach();
+                                  auto thread_it = executor->threads.begin() + i;
+                                  executor->threads.erase(thread_it);
+                                  break;
+                              }
+                          }
+                          return;
+                    }
+                    continue;
                 }
 
-                auto res = executor->empty_condition.wait_for(lock,
-                                                                executor->idle_time,
-                                                            [&executor]() {return (!executor->tasks.empty() && executor->state != Executor::State::kStopping);});
-                if ((!res && (executor->threads.size() > executor->low_watermark)) ||
-                        (executor->state == Executor::State::kStopped))
-                {
-                    if (executor->threads.size() > executor->low_watermark)
-                    // kill current thread
 
-                    {
-                        auto curr_thread_id = std::this_thread::get_id();
-                        for (size_t i = 0; i < executor->threads.size(); i++)
-                        {
-                            if (executor->threads[i].get_id() == curr_thread_id)
-                            {
-                                executor->threads[i].detach();
-                                auto thread_it = executor->threads.begin() + i;
-                                executor->threads.erase(thread_it);
-                                break;
-                            }
-                        }
-                    }
+                if (executor->state == Executor::State::kStopped)
+                {
                     return;
                 }
-
 
                 executor->num_working++;
                 task = executor->tasks.front();
                 executor->tasks.pop_front();
             }
             // out of lock
-            std::cout << "going to start task\n";
-
             task();
-            std::cout << "completed task\n";
         }
 
     }
