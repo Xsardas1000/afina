@@ -3,6 +3,7 @@
 
 #include <memory>
 #include <pthread.h>
+#include <atomic>
 
 namespace Afina {
 
@@ -19,11 +20,16 @@ namespace NonBlocking {
  */
 class Worker {
 public:
-    Worker(std::shared_ptr<Afina::Storage> ps);
-    ~Worker();
+
+
+  Worker(std::shared_ptr<Afina::Storage> ps);
+
+  ~Worker();
+
+  Worker(const Worker& w) : pStorage(w.pStorage) {};
 
     /**
-     * Spaws new background thread that is doing epoll on the given server
+     * Spanws new background thread that is doing epoll on the given server
      * socket. Once connection accepted it must be registered and being processed
      * on this thread
      */
@@ -48,9 +54,22 @@ protected:
      * Method executing by background thread
      */
     void OnRun(void *args);
+    static void *OnRunProxy(void *args);
+    void ConnectionWork(int client_socket);
+
 
 private:
+    std::shared_ptr<Afina::Storage> pStorage;
+    int server_socket;
+
+    std::atomic<bool> running;
     pthread_t thread;
+
+    struct worker_pthread_args {
+        int server_socket;
+        void *ptr;
+    };
+
 };
 
 } // namespace NonBlocking

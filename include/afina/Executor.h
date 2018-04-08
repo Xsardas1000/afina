@@ -82,8 +82,6 @@ public:
 //            threads.emplace_back(thread_id);
         }
 
-
-
         // Enqueue new task
         tasks.push_back(exec);
         empty_condition.notify_one();
