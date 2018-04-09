@@ -55,7 +55,7 @@ protected:
      */
     void OnRun(void *args);
     static void *OnRunProxy(void *args);
-    void ConnectionWork(int client_socket);
+    bool ConnectionWork(int client_socket);
 
 
 private:

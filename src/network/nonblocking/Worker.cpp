@@ -101,13 +101,13 @@ void Worker::OnRun(void *args) {
     // 1. Create epoll_context here
     int max_epoll = 5;
     int epoll_fd = epoll_create(max_epoll);
-    if (!epoll_fd) {
+    if (epoll_fd == -1) {
        throw std::runtime_error("Failed to create epoll context.");
     }
 
     // 2. Add server_socket to context
     struct epoll_event server_listen_event;
-    server_listen_event.events = EPOLLIN | EPOLLET | EPOLLEXCLUSIVE;
+    server_listen_event.events = EPOLLEXCLUSIVE | EPOLLIN | EPOLLHUP | EPOLLERR;
     server_listen_event.data.ptr = (void*)&server_socket;
     if (epoll_ctl(epoll_fd, EPOLL_CTL_ADD, server_socket, &server_listen_event) == -1) {
         throw std::runtime_error("Failed to add an event for server socket.");
@@ -154,18 +154,20 @@ void Worker::OnRun(void *args) {
                 if (epoll_ctl(epoll_fd, EPOLL_CTL_ADD, client_socket, &client_conn_event) == -1) {
                     throw std::runtime_error("Failed to add an event for client socket.");
                 }
-            } else if( EPOLLHUP & events[i].events || EPOLLERR & events[i].events ) {
-                close(*(int*)events[i].data.ptr);
-            } else {
+            }
+            else {
+                int client_socket = *(int *)events[i].data.ptr;
                 // 5. Process connection events
-                //std::cout << "Processing connection in thread " << thread << std::endl;
-                int client_socket = *(int*)events[i].data.ptr;
-
-
-
-
-                close(client_socket);
-                //std::cout << "Closing socket and leaving this connection\n";
+                if (events[i].events & (EPOLLERR | EPOLLHUP)) {
+                    epoll_ctl(epoll_fd, EPOLL_CTL_DEL, client_socket, NULL);
+                } else if (events[i].events & EPOLLIN) {
+                    if (ConnectionWork(client_socket) == true) {
+                        epoll_ctl(epoll_fd, EPOLL_CTL_DEL, client_socket, NULL);
+                        close(client_socket);
+                    }
+                } else {
+                    throw std::runtime_error("Unknown event");
+                }
             }
         }
     }
@@ -180,8 +182,82 @@ void Worker::OnRun(void *args) {
     // for events to avoid thundering herd type behavior.
 }
 
-void Worker::ConnectionWork(int client_socket) {
+bool Worker::ConnectionWork(int client_socket) {
+  // TODO: All connection work is here
+  size_t buf_size = 256;
+  char buf[buf_size];
+  memset(buf, 0, buf_size);
+  ssize_t received;
+  size_t parsed = 0;
+  Afina::Protocol::Parser parser;
+  std::string command = "";
 
+  bool parse_finished = false;
+  while(running.load() && ((received = (int)read(client_socket, buf, buf_size)) != 0 || !command.empty() > 0) )
+  {
+      if(received < 0)
+      {
+          std::cout << "Reading stream error" << std::endl;
+          break;
+      }
+
+      //std::cout << "buf after reading:" << buf << std::endl;
+      command += buf;
+      try
+      {
+          parse_finished = parser.Parse(command.c_str(), received, parsed);
+          //std::cout << "buf after parsing:" << buf << std::endl;
+
+      } catch(...) {
+          std::string result = "PARSE ERROR\r\n";
+          if (send(client_socket, result.data(), result.size(), 0) <= 0)
+          {
+              close(client_socket);
+              throw std::runtime_error("Socket send() failed");
+          }
+          break;
+      }
+      command.erase(0, parsed); //remove parsed characters from the beginning
+      parsed = 0;
+
+      // if parser returns true, it means that it has parsed the hole command
+      if(parse_finished) {
+          uint32_t body_size;
+
+          //create new command and get number of bytes to read (arguments for the command)
+          std::unique_ptr<Afina::Execute::Command> com_ptr = parser.Build(body_size);
+
+          parser.Reset();
+          parsed = 0;
+
+          std::cout << "Bytes to read:" << body_size << std::endl;
+          std::string args;
+          if(body_size > 0) {
+              while(body_size + 2 > command.size())
+              {
+                  received = read(client_socket, buf, buf_size);
+                  command += buf;
+              }
+
+              args = command.substr(0, body_size);
+          }
+          command.clear();
+          std::string result;
+          try {
+              com_ptr->Execute(*pStorage, args, result);
+          } catch(...) {
+              result = "SERVER_ERROR";
+          }
+          result += "\r\n";
+          if (!result.empty() && send(client_socket, result.data(), result.size(), 0) <= 0) {
+              close(client_socket);
+              throw std::runtime_error("Socket send() failed");
+          }
+
+      }
+      memset(buf, 0, buf_size);
+  }
+  return parse_finished;
 
 }
 
