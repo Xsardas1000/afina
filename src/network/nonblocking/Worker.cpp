@@ -48,12 +48,15 @@ void Worker::Start(int server_socket) {
     std::cout << "network debug: " << __PRETTY_FUNCTION__ << std::endl;
     // TODO: implementation here
 
+
+    //std::cout << "worker start " << server_socket << std::endl;
     this->server_socket = server_socket;
     running.store(true);
     struct worker_pthread_args *args = (struct worker_pthread_args*)malloc(sizeof(struct worker_pthread_args));
     args->server_socket = server_socket;
     args->ptr = this;
 
+    // each worker listens server_socket
     if (pthread_create(&thread, NULL, OnRunProxy, args) < 0) {
         throw std::runtime_error("Could not create worker thread");
     }
@@ -85,7 +88,7 @@ void *Worker::OnRunProxy(void *p) {
     auto server_socket = args->server_socket;
 
     try {
-        worker->OnRun(args);
+        worker->OnRun(server_socket);
     } catch (std::runtime_error &ex) {
         std::cerr << "Worker fails: " << ex.what() << std::endl;
     }
@@ -94,21 +97,40 @@ void *Worker::OnRunProxy(void *p) {
 
 
 // See Worker.h
-void Worker::OnRun(void *args) {
+void Worker::OnRun(int server_socket) {
     std::cout << "network debug: " << __PRETTY_FUNCTION__ << std::endl;
 
+    std::cout << "worker on run " << server_socket << std::endl;
+    this->server_socket = server_socket;
     // TODO: implementation here
     // 1. Create epoll_context here
-    int max_epoll = 5;
+    int max_epoll = 20;
     int epoll_fd = epoll_create(max_epoll);
     if (epoll_fd == -1) {
        throw std::runtime_error("Failed to create epoll context.");
     }
 
     // 2. Add server_socket to context
-    struct epoll_event server_listen_event;
-    server_listen_event.events = EPOLLEXCLUSIVE | EPOLLIN | EPOLLHUP | EPOLLERR;
-    server_listen_event.data.ptr = (void*)&server_socket;
+    struct epoll_event server_listen_event = {};
+    server_listen_event.events = EPOLLIN | EPOLLHUP | EPOLLERR | EPOLLEXCLUSIVE;
+    server_listen_event.data.fd = server_socket;
+
+
+    // События, за которыми можно наблюдать с помощью epoll:
+    //
+    // EPOLLIN — новые данные (для чтения) в файловом дескрипторе
+    // EPOLLOUT — файловый дескриптор готов продолжить принимать данные (для записи)
+    // EPOLLERR — в файловом дескрипторе произошла ошибка
+    // EPOLLHUP — закрытие файлового дескриптора
+
+    //Cистемный вызов epoll_ctl выполняет операции управления экземпляром epoll,
+    //на который указывает файловый дескриптор epoll_fd. Он запрашивает выполнение операции
+    //op для файлового дескриптора назначения fd.
+
+    //EPOLL_CTL_ADD - Зарегистрировать файловый дескриптор назначения server_socket в экземпляре epoll,
+    //на который указывает файловый дескриптор epoll_fd, и связать событие server_listen_event с внутренним файлом,
+    //указывающим на fd.
+
     if (epoll_ctl(epoll_fd, EPOLL_CTL_ADD, server_socket, &server_listen_event) == -1) {
         throw std::runtime_error("Failed to add an event for server socket.");
     }
@@ -118,30 +140,36 @@ void Worker::OnRun(void *args) {
     unsigned int MAXEVENTS = 20;
     struct epoll_event *events = (epoll_event*)calloc(MAXEVENTS, sizeof(struct epoll_event));
 
-
     while(running.load())
     {
-        // waiting for a event on the epoll object, on which epoll_fd (file descriptor) points to
-        // can return from 1 to MAXEVENTS
+        std::cout << "While loop on worker\n";
+        //Системный вызов epoll_wait() ожидает события на экземпляре epoll, на который указывает
+        //файловый дескриптор epoll_fd. Область памяти, на которую указывает events, будет содержать события,
+        //доступные для обработки. Вызов epoll_wait() может вернуть до MAXEVENTS событий.
         int n = epoll_wait(epoll_fd, events, MAXEVENTS, -1);
+
+        std::cout << "events happend\n";
+        //возвращает количество файловых дескрипторов, готовых для запросов ввода-вывода
         if (n == -1) {
             throw std::runtime_error("Failed to epoll_wait");
         }
-
+        std::cout << "test\n";
         // for each ready socket
         for (int i = 0; i < n; ++i) {
-            if (&server_socket == events[i].data.ptr) {
+            if (server_socket == events[i].data.fd) {
                 // 3. Accept new connections, don't forget to call make_socket_nonblocking on
                 //    the client socket descriptor
                 int client_socket = accept(server_socket, (struct sockaddr *)&clientaddr, &clientlen);
                 if (client_socket == -1) {
-                    if( errno == EINVAL || errno == EAGAIN || errno == EWOULDBLOCK ) {
-                        std::cout << "Accept returned EINVAL\n";
-                        break;
-                    } else {
-                        throw std::runtime_error("Accept failed");
+                    std::cout << "accept returned -1\n";
+                    if (errno == EAGAIN || errno == EWOULDBLOCK) {
+                      close(server_socket);
+                      if (running.load()) {
+                          throw std::runtime_error("Worker failed to accept");
+                      }
                     }
                 }
+                std::cout << "accepted client socket" << std::endl;
                 make_socket_non_blocking(client_socket);
 
                 // 4. Add connections to the local context
@@ -149,19 +177,19 @@ void Worker::OnRun(void *args) {
                 // Do not forget to use EPOLLEXCLUSIVE flag when register socket
                 // for events to avoid thundering herd type behavior.
                 struct epoll_event client_conn_event;
-                client_conn_event.events = EPOLLIN | EPOLLOUT;
-                client_conn_event.data.ptr = (void*)&client_socket;
+                client_conn_event.events = EPOLLIN  | EPOLLERR | EPOLLHUP;
+                client_conn_event.data.fd = client_socket;  // buf, state, clent_socket
                 if (epoll_ctl(epoll_fd, EPOLL_CTL_ADD, client_socket, &client_conn_event) == -1) {
                     throw std::runtime_error("Failed to add an event for client socket.");
                 }
             }
             else {
-                int client_socket = *(int *)events[i].data.ptr;
+                int client_socket = events[i].data.fd;
                 // 5. Process connection events
                 if (events[i].events & (EPOLLERR | EPOLLHUP)) {
                     epoll_ctl(epoll_fd, EPOLL_CTL_DEL, client_socket, NULL);
                 } else if (events[i].events & EPOLLIN) {
-                    if (ConnectionWork(client_socket) == true) {
+                    if (ConnectionWork(client_socket)) {
                         epoll_ctl(epoll_fd, EPOLL_CTL_DEL, client_socket, NULL);
                         close(client_socket);
                     }
@@ -172,7 +200,7 @@ void Worker::OnRun(void *args) {
         }
     }
 
-
+    close(epoll_fd);
     // 3. Accept new connections, don't forget to call make_socket_nonblocking on
     //    the client socket descriptor
     // 4. Add connections to the local context
@@ -197,8 +225,11 @@ bool Worker::ConnectionWork(int client_socket) {
   {
       if(received < 0)
       {
-          std::cout << "Reading stream error" << std::endl;
-          break;
+        if(errno == EAGAIN || errno == EWOULDBLOCK ) {
+            return false;
+        } else {
+            throw std::runtime_error("Accept failed");
+        }
       }
 
       //std::cout << "buf after reading:" << buf << std::endl;

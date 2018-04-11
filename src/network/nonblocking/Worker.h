@@ -48,12 +48,13 @@ public:
      * been destoryed
      */
     void Join();
+    pthread_t thread;
 
 protected:
     /**
      * Method executing by background thread
      */
-    void OnRun(void *args);
+    void OnRun(int server_socket);
     static void *OnRunProxy(void *args);
     bool ConnectionWork(int client_socket);
 
@@ -63,7 +64,6 @@ private:
     int server_socket;
 
     std::atomic<bool> running;
-    pthread_t thread;
 
     struct worker_pthread_args {
         int server_socket;

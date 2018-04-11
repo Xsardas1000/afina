@@ -57,7 +57,8 @@ void Engine::yield() {
 void Engine::sched(void *routine_) {
 //    std::cout << "coroutine debug: " << __PRETTY_FUNCTION__ << std::endl;
     context *ctx = (context*)routine_;
-
+    //Функция setjmp() сохраняет содержимое стека системы в буфере envbuf для
+    //дальнейшего ис­пользования функцией longjmp().
     if (cur_routine != nullptr ){
         Store(*cur_routine);
         if (setjmp(cur_routine->Environment) > 0) {

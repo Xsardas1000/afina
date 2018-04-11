@@ -49,7 +49,7 @@ void _printer(Afina::Coroutine::Engine &pe, std::string &result) {
     // Create routines, note it doens't get control yet
     pa = pe.run(printa, pe, out, pb);
     pb = pe.run(printb, pe, out, pa);
-
+    std::cout << "test\n";
     // Pass control to first routine, it will ping pong
     // between printa/printb greedely then we will get
     // control back
