@@ -100,7 +100,7 @@ void *Worker::OnRunProxy(void *p) {
 void Worker::OnRun(int server_socket) {
     std::cout << "network debug: " << __PRETTY_FUNCTION__ << std::endl;
 
-    std::cout << "worker on run " << server_socket << std::endl;
+    //std::cout << "worker on run " << server_socket << std::endl;
     this->server_socket = server_socket;
     // TODO: implementation here
     // 1. Create epoll_context here
@@ -153,7 +153,7 @@ void Worker::OnRun(int server_socket) {
         if (n == -1) {
             throw std::runtime_error("Failed to epoll_wait");
         }
-        std::cout << "test\n";
+        //std::cout << "test\n";
         // for each ready socket
         for (int i = 0; i < n; ++i) {
             if (server_socket == events[i].data.fd) {
@@ -162,11 +162,10 @@ void Worker::OnRun(int server_socket) {
                 int client_socket = accept(server_socket, (struct sockaddr *)&clientaddr, &clientlen);
                 if (client_socket == -1) {
                     std::cout << "accept returned -1\n";
-                    if (errno == EAGAIN || errno == EWOULDBLOCK) {
+                    if (!(errno == EAGAIN || errno == EWOULDBLOCK)) {
                       close(server_socket);
-                      if (running.load()) {
-                          throw std::runtime_error("Worker failed to accept");
-                      }
+                    } else {
+                        continue;
                     }
                 }
                 std::cout << "accepted client socket" << std::endl;
