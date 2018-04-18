@@ -68,6 +68,11 @@ void Worker::Stop() {
     std::cout << "network debug: " << __PRETTY_FUNCTION__ << std::endl;
     // TODO: implementation here
     running.store(false);
+
+    for (auto socket : connection_sockets){
+        close(socket);
+    }
+
     shutdown(server_socket, SHUT_RDWR);
 }
 
@@ -100,7 +105,7 @@ void *Worker::OnRunProxy(void *p) {
 void Worker::OnRun(int server_socket) {
     std::cout << "network debug: " << __PRETTY_FUNCTION__ << std::endl;
 
-    //std::cout << "worker on run " << server_socket << std::endl;
+    std::cout << "worker on run " << server_socket << std::endl;
     this->server_socket = server_socket;
     // TODO: implementation here
     // 1. Create epoll_context here
@@ -138,7 +143,8 @@ void Worker::OnRun(int server_socket) {
     struct sockaddr_in clientaddr;
     socklen_t clientlen = sizeof(clientaddr);
     unsigned int MAXEVENTS = 20;
-    struct epoll_event *events = (epoll_event*)calloc(MAXEVENTS, sizeof(struct epoll_event));
+    struct epoll_event *events = (epoll_event*) calloc(MAXEVENTS, sizeof(struct epoll_event));
+
 
     while(running.load())
     {
@@ -156,7 +162,16 @@ void Worker::OnRun(int server_socket) {
         //std::cout << "test\n";
         // for each ready socket
         for (int i = 0; i < n; ++i) {
-            if (server_socket == events[i].data.fd) {
+            int current_socket = events[i].data.fd;
+            if (server_socket == current_socket) {
+
+                if (events[i].events & (EPOLLERR | EPOLLHUP)) {
+                    std::cout << "EPOLLERR or EPOLLHUB, server_socket\n";
+                    epoll_ctl(epoll_fd, EPOLL_CTL_DEL, server_socket, NULL);
+                    close(server_socket);
+                    throw std::runtime_error("Server stopped");
+
+                }
                 // 3. Accept new connections, don't forget to call make_socket_nonblocking on
                 //    the client socket descriptor
                 int client_socket = accept(server_socket, (struct sockaddr *)&clientaddr, &clientlen);
@@ -170,6 +185,7 @@ void Worker::OnRun(int server_socket) {
                 }
                 std::cout << "accepted client socket" << std::endl;
                 make_socket_non_blocking(client_socket);
+                connection_sockets.insert(client_socket);
 
                 // 4. Add connections to the local context
                 //
@@ -181,23 +197,31 @@ void Worker::OnRun(int server_socket) {
                 if (epoll_ctl(epoll_fd, EPOLL_CTL_ADD, client_socket, &client_conn_event) == -1) {
                     throw std::runtime_error("Failed to add an event for client socket.");
                 }
-            }
-            else {
-                int client_socket = events[i].data.fd;
-                // 5. Process connection events
-                if (events[i].events & (EPOLLERR | EPOLLHUP)) {
-                    epoll_ctl(epoll_fd, EPOLL_CTL_DEL, client_socket, NULL);
-                } else if (events[i].events & EPOLLIN) {
-                    if (ConnectionWork(client_socket)) {
-                        epoll_ctl(epoll_fd, EPOLL_CTL_DEL, client_socket, NULL);
-                        close(client_socket);
+
+            } else {
+              std::cout << "test\n";
+              if (connection_sockets.count(current_socket) != 0 && events[i].events & (EPOLLERR | EPOLLHUP)) {
+                  std::cout << "EPOLLERR or EPOLLHUB, client socket\n";
+
+                  connection_sockets.erase(current_socket);
+                  if (epoll_ctl(epoll_fd, EPOLL_CTL_DEL, current_socket, nullptr) == -1) {
+                      throw std::runtime_error("Failed delete current_socket from epoll");
+                  }
+                  close(current_socket);
+
+              } else if (connection_sockets.count(current_socket) != 0 && events[i].events & EPOLLIN) {
+                    std::cout << "EPOLLIN Event client\n";
+                    if (ConnectionWork(current_socket)) {
+                        epoll_ctl(epoll_fd, EPOLL_CTL_DEL, current_socket, NULL);
+                        close(current_socket);
                     }
-                } else {
-                    throw std::runtime_error("Unknown event");
-                }
+              } else {
+                  throw std::runtime_error("Unknown event");
+              }
             }
         }
     }
+
 
     close(epoll_fd);
     // 3. Accept new connections, don't forget to call make_socket_nonblocking on
@@ -220,17 +244,15 @@ bool Worker::ConnectionWork(int client_socket) {
   std::string command = "";
 
   bool parse_finished = false;
-  while(running.load() && ((received = (int)read(client_socket, buf, buf_size)) != 0 || !command.empty() > 0) )
+  std::cout << "Start parsing on worker\n";
+  while (running.load())
   {
-      if(received < 0)
+      if((received = (int)read(client_socket, buf, buf_size))  < 0)
       {
-        if(errno == EAGAIN || errno == EWOULDBLOCK ) {
-            return false;
-        } else {
-            throw std::runtime_error("Accept failed");
-        }
+          break;
       }
 
+      std::cout << "received buf: " << buf << std::endl;
       //std::cout << "buf after reading:" << buf << std::endl;
       command += buf;
       try
@@ -258,7 +280,6 @@ bool Worker::ConnectionWork(int client_socket) {
           std::unique_ptr<Afina::Execute::Command> com_ptr = parser.Build(body_size);
 
           parser.Reset();
-          parsed = 0;
 
           std::cout << "Bytes to read:" << body_size << std::endl;
           std::string args;
@@ -280,15 +301,13 @@ bool Worker::ConnectionWork(int client_socket) {
           }
           result += "\r\n";
           if (!result.empty() && send(client_socket, result.data(), result.size(), 0) <= 0) {
-              close(client_socket);
               throw std::runtime_error("Socket send() failed");
           }
 
       }
       memset(buf, 0, buf_size);
   }
-  return parse_finished;
-
+  return true;
 }
 
 

@@ -46,6 +46,7 @@ void Engine::yield() {
     if (alive != nullptr) {
         // take the first task from alive list
         context *new_routine = alive;
+
         if (alive->next != nullptr) {
           alive->next->prev = nullptr;
         }

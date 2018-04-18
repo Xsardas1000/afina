@@ -52,14 +52,14 @@ void ServerImpl::Start(uint32_t listen_port, uint16_t n_workers) {
     server_addr.sin_addr.s_addr = INADDR_ANY;  // Bind to any address
 
 
-    std::cout << listen_port << '\n';
+    //std::cout << listen_port << '\n';
 
     int server_socket = socket(PF_INET, SOCK_STREAM, IPPROTO_TCP);
     if (server_socket == -1) {
         throw std::runtime_error("Failed to open socket");
     }
 
-    std::cout << server_socket << std::endl;
+    //std::cout << server_socket << std::endl;
 
     int opts = 1;
     if (setsockopt(server_socket, SOL_SOCKET, SO_REUSEADDR, &opts, sizeof(opts)) == -1) {

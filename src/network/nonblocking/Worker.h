@@ -4,6 +4,7 @@
 #include <memory>
 #include <pthread.h>
 #include <atomic>
+#include <unordered_set>
 
 namespace Afina {
 
@@ -62,6 +63,8 @@ protected:
 private:
     std::shared_ptr<Afina::Storage> pStorage;
     int server_socket;
+
+    std::unordered_set<int> connection_sockets;
 
     std::atomic<bool> running;
 
